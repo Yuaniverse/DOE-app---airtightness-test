@@ -37,6 +37,7 @@ Streamlit Community Cloud 會自動讀取：
 
 - `requirements.txt`
 
+本專案的 `requirements.txt` 已精簡為「直接依賴」版本，以降低 Community Cloud 卡在 **Your app is in the oven** 的機率。
 本專案不需要額外系統套件。
 
 ## 本機執行
