@@ -276,9 +276,9 @@ def render_stats_analysis() -> None:
             )
 
             st.subheader("📋 變異數分析 (ANOVA)")
-            formatted_anova = anova_table.style.format(
-                {"Sum Sq": "{:.4f}", "F-Value": "{:.2f}", "p-value": "{:.4f}", "DF": "{:.0f}"}
-            ).map(_style_pvalue, subset=["p-value"])
+            formatted_anova = anova_table.copy().round(
+                {"Sum Sq": 4, "F-Value": 2, "p-value": 4, "DF": 0}
+            )
             st.dataframe(formatted_anova, width="stretch")
             st.caption("🔴 p-value < 0.05 代表該因子/交互作用具備統計顯著性。此處採 Type III SS，較接近 DOE / Minitab 慣用做法。")
 
@@ -384,10 +384,8 @@ def render_stats_analysis() -> None:
             }
         )
     suggestion_df = pd.DataFrame(suggestion_rows)
-    st.dataframe(
-        suggestion_df.style.format({"主效應 p-value": "{:.4f}"}).map(_style_pvalue, subset=["主效應 p-value"]),
-        width="stretch",
-    )
+    suggestion_display_df = suggestion_df.copy().round({"主效應 p-value": 4})
+    st.dataframe(suggestion_display_df, width="stretch")
 
     if curvature_result["significant"] and not significant_factors:
         default_selected_factors = FACTOR_COLUMNS.copy()

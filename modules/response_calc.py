@@ -323,47 +323,21 @@ def render_response_calc() -> None:
         ]
         display_df = result_df[display_cols].copy()
 
-        # 條件格式化
-        def style_results(df: pd.DataFrame):
-            """套用條件格式化至結果 DataFrame。"""
-            styler = df.style
+        formatted_display_df = display_df.copy()
+        rounding_map = {
+            "Pvac": 1,
+            "Tvac": 1,
+            "Tstab": 1,
+            "Ttest": 1,
+            "Y1_TotalTime": 1,
+            "Y2_AUC": 3,
+            "Y3_GapQ": 4,
+            "Y4_Stability": 4,
+        }
+        formatted_display_df = formatted_display_df.round(rounding_map)
 
-            # Y4 越大越不穩定 → 背景梯度紅色
-            styler = styler.background_gradient(
-                subset=["Y4_Stability"],
-                cmap="Reds",
-                vmin=0,
-            )
-
-            # GapQ 越小越危險 → 背景梯度紅到綠
-            styler = styler.background_gradient(
-                subset=["Y3_GapQ"],
-                cmap="RdYlGn",
-            )
-
-            # AUC 越高越好 → 背景梯度綠色
-            styler = styler.background_gradient(
-                subset=["Y2_AUC"],
-                cmap="Greens",
-                vmin=0,
-                vmax=1,
-            )
-
-            styler = styler.format(
-                {
-                    "Y1_TotalTime": "{:.1f}",
-                    "Y2_AUC": "{:.3f}",
-                    "Y3_GapQ": "{:.4f}",
-                    "Y4_Stability": "{:.4f}",
-                    "Pvac": "{:.1f}",
-                    "Tvac": "{:.1f}",
-                    "Tstab": "{:.1f}",
-                    "Ttest": "{:.1f}",
-                }
-            )
-            return styler
-
-        st.dataframe(style_results(display_df), width="stretch")
+        st.dataframe(formatted_display_df, width="stretch")
+        st.caption("AUC 越高越好、GapQ 越大越安全、Y4 越小越穩定。為提升雲端相容性，此表改為非漸層顯示。")
 
         # 關鍵指標摘要
         st.subheader("📈 關鍵指標摘要")

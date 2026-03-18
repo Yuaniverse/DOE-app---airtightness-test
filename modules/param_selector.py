@@ -163,21 +163,19 @@ def render_param_selector() -> None:
         "Pvac", "Tvac", "Tstab", "Ttest",
         "Y1_TotalTime", "Y2_AUC", "Y3_GapQ", "Y4_Stability",
     ]
-    st.dataframe(
-        filtered_df[display_cols].style.format(
-            {
-                "Y1_TotalTime": "{:.1f}",
-                "Y2_AUC": "{:.3f}",
-                "Y3_GapQ": "{:.4f}",
-                "Y4_Stability": "{:.4f}",
-                "Pvac": "{:.1f}",
-                "Tvac": "{:.1f}",
-                "Tstab": "{:.1f}",
-                "Ttest": "{:.1f}",
-            }
-        ),
-        width="stretch",
+    display_df = filtered_df[display_cols].copy().round(
+        {
+            "Pvac": 1,
+            "Tvac": 1,
+            "Tstab": 1,
+            "Ttest": 1,
+            "Y1_TotalTime": 1,
+            "Y2_AUC": 3,
+            "Y3_GapQ": 4,
+            "Y4_Stability": 4,
+        }
     )
+    st.dataframe(display_df, width="stretch")
 
     # ── 最佳參數推薦 ──
     best = filtered_df.iloc[0]
