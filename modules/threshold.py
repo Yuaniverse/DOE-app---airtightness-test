@@ -58,6 +58,11 @@ def render_threshold_determination() -> None:
         st.error("❌ 缺少必要的計算數據，請重新執行模組二。")
         return
 
+    filtered_df = st.session_state.get("filtered_df")
+    if filtered_df is None or len(filtered_df) == 0:
+        st.info("💡 請先於模組三完成參數篩選，才能選擇參數組合進行界線判定。")
+        return
+
     best_row = st.session_state["best_param_row"]
     result_df = st.session_state["result_df"]
     ok_ids = st.session_state["ok_ids"]
@@ -65,24 +70,51 @@ def render_threshold_determination() -> None:
     ng_direction = st.session_state.get("ng_direction", "higher")
     reject_rule = "dP ≥ t → NG" if ng_direction == "higher" else "dP ≤ t → NG"
 
-    # 顯示最佳參數
+    filtered_df = filtered_df.reset_index(drop=True)
+    selected_default_index = 0
+    for idx, row in filtered_df.iterrows():
+        if row["Run_Order"] == best_row["Run_Order"]:
+            selected_default_index = idx
+            break
+
+    option_labels = [
+        (
+            f"Run {int(row['Run_Order'])} | "
+            f"Pvac={row['Pvac']:.1f}, Tvac={row['Tvac']:.1f}, "
+            f"Tstab={row['Tstab']:.1f}, Ttest={row['Ttest']:.1f}"
+        )
+        for _, row in filtered_df.iterrows()
+    ]
+
+    st.subheader("🧩 參數組合選擇")
+    selected_label = st.selectbox(
+        "選擇要進行界線判定的參數組合",
+        options=option_labels,
+        index=selected_default_index,
+        help="預設為模組三推薦的最佳參數，也可切換查看其他候選組合的界線風險。",
+        key="threshold_param_combo_select",
+    )
+    selected_index = option_labels.index(selected_label)
+    selected_row = filtered_df.iloc[selected_index]
+
+    # 顯示當前選擇參數
     st.info(
-        f"🎯 當前最佳參數：**Pvac={best_row['Pvac']:.1f}**, "
-        f"**Tvac={best_row['Tvac']:.1f}**, "
-        f"**Tstab={best_row['Tstab']:.1f}**, "
-        f"**Ttest={best_row['Ttest']:.1f}**"
+        f"🎯 當前分析參數：**Pvac={selected_row['Pvac']:.1f}**, "
+        f"**Tvac={selected_row['Tvac']:.1f}**, "
+        f"**Tstab={selected_row['Tstab']:.1f}**, "
+        f"**Ttest={selected_row['Ttest']:.1f}**"
     )
 
-    # ── 提取最佳參數行的 10 台樣品 dP 值 ──
+    # ── 提取所選參數行的 10 台樣品 dP 值 ──
     step_id_cols = [f"Step{i}_ID" for i in range(1, 13)]
     step_dp_cols = [f"Step{i}_dP" for i in range(1, 13)]
 
-    # 找到最佳參數對應的行
-    best_run = best_row["Run_Order"]
-    best_row_data = result_df[result_df["Run_Order"] == best_run]
+    # 找到所選參數對應的行
+    selected_run = selected_row["Run_Order"]
+    best_row_data = result_df[result_df["Run_Order"] == selected_run]
 
     if len(best_row_data) == 0:
-        st.error("❌ 無法找到最佳參數對應的實驗數據行。")
+        st.error("❌ 無法找到所選參數組合對應的實驗數據行。")
         return
 
     best_row_data = best_row_data.iloc[0]
@@ -109,7 +141,7 @@ def render_threshold_determination() -> None:
         return
 
     # 顯示原始數據
-    st.subheader("📊 最佳參數行 dP 數據")
+    st.subheader("📊 所選參數組合 dP 數據")
     data_col1, data_col2 = st.columns(2)
     with data_col1:
         ok_data = pd.DataFrame({"樣品 ID": ok_ids, "dP 值": ok_dps})
@@ -120,7 +152,7 @@ def render_threshold_determination() -> None:
         st.markdown("**❌ NG 不良品 dP**")
         st.dataframe(ng_data, hide_index=True, width="stretch")
 
-    st.caption("注意：此處僅使用最佳參數行的 5 台 OK + 5 台 NG 做小樣本模擬。正式量產前，建議以更大樣本再驗證界線穩健性。")
+    st.caption("注意：此處僅使用所選參數組合該行的 5 台 OK + 5 台 NG 做小樣本模擬。正式量產前，建議以更大樣本再驗證界線穩健性。")
 
     st.divider()
 

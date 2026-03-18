@@ -22,15 +22,20 @@ FACTOR_COLUMNS = ["Pvac", "Tvac", "Tstab", "Ttest"]
 
 def generate_doe_matrix(
     factors: dict[str, tuple[float, float]],
+    n_center_points: int = 6,
 ) -> pd.DataFrame:
-    """產生 2^4 全因子設計矩陣 + 6 個中心點。
+    """產生 2^4 全因子設計矩陣 + 可調式中心點。
 
     Args:
         factors: 因子名稱 → (低水準, 高水準) 的字典。
+        n_center_points: 中心點重複次數。
 
     Returns:
-        包含 22 列實驗條件的 DataFrame，含 Std_Order 與 Point_Type。
+        包含角落點與中心點的 DataFrame，含 Std_Order 與 Point_Type。
     """
+    if n_center_points < 1:
+        raise ValueError("n_center_points 必須 >= 1")
+
     factor_names = list(factors.keys())
     levels = [factors[name] for name in factor_names]
 
@@ -40,11 +45,14 @@ def generate_doe_matrix(
     df_corner["Point_Type"] = "Corner"
     df_corner["Std_Order"] = range(1, len(df_corner) + 1)
 
-    # 6 個中心點
+    # 可調式中心點
     center_values = {name: (lo + hi) / 2 for name, (lo, hi) in factors.items()}
-    df_center = pd.DataFrame([center_values] * 6)
+    df_center = pd.DataFrame([center_values] * n_center_points)
     df_center["Point_Type"] = "Center"
-    df_center["Std_Order"] = range(len(df_corner) + 1, len(df_corner) + 7)
+    df_center["Std_Order"] = range(
+        len(df_corner) + 1,
+        len(df_corner) + 1 + n_center_points,
+    )
 
     df = pd.concat([df_corner, df_center], ignore_index=True)
     return df
@@ -268,6 +276,16 @@ def render_doe_generator() -> None:
         tstab_hi = st.number_input("Tstab 高 (sec)", value=8.0, key="tstab_hi", format="%.1f")
         ttest_hi = st.number_input("Ttest 高 (sec)", value=8.0, key="ttest_hi", format="%.1f")
 
+    center_point_count = st.number_input(
+        "🎯 中心點重複次數",
+        min_value=1,
+        max_value=20,
+        value=6,
+        step=1,
+        help="設定 DOE 中心點要重複執行幾次，預設為 6 次。",
+        key="center_point_count",
+    )
+
     st.divider()
 
     # ── 樣品 ID 輸入區 ──
@@ -321,7 +339,10 @@ def render_doe_generator() -> None:
 
         with st.spinner("正在產生 DOE 矩陣..."):
             # Step 1: 產生矩陣
-            doe_df = generate_doe_matrix(factors)
+            doe_df = generate_doe_matrix(
+                factors,
+                n_center_points=int(center_point_count),
+            )
 
             # Step 2: 隨機化
             doe_df = randomize_run_order(doe_df, seed=seed_value)
