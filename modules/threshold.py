@@ -14,27 +14,33 @@ def calc_confusion_matrix(
     ok_dps: np.ndarray,
     ng_dps: np.ndarray,
     threshold: float,
+    ng_direction: str = "higher",
 ) -> dict[str, int]:
     """根據判定界線計算混淆矩陣。
 
-    判定規則：dP >= threshold → 系統判定 NG (Reject)；dP < threshold → 系統判定 OK (Pass)。
+    判定規則：
+    - ng_direction = "higher"：dP >= threshold → NG
+    - ng_direction = "lower"：dP <= threshold → NG
 
     Args:
         ok_dps: OK 良品的 dP 陣列。
         ng_dps: NG 不良品的 dP 陣列。
         threshold: 判定界線 t。
+        ng_direction: NG 樣品的 dP 預期方向（"higher" 或 "lower"）。
 
     Returns:
         包含 TP, TN, FP, FN 數值的字典。
     """
-    # 真實 NG 且系統判定 NG (True Positive)
-    tp = int(np.sum(ng_dps >= threshold))
-    # 真實 NG 但系統判定 OK (False Negative - 漏網之魚)
-    fn = int(np.sum(ng_dps < threshold))
-    # 真實 OK 但系統判定 NG (False Positive - 誤殺良品)
-    fp = int(np.sum(ok_dps >= threshold))
-    # 真實 OK 且系統判定 OK (True Negative)
-    tn = int(np.sum(ok_dps < threshold))
+    if ng_direction == "higher":
+        tp = int(np.sum(ng_dps >= threshold))
+        fn = int(np.sum(ng_dps < threshold))
+        fp = int(np.sum(ok_dps >= threshold))
+        tn = int(np.sum(ok_dps < threshold))
+    else:
+        tp = int(np.sum(ng_dps <= threshold))
+        fn = int(np.sum(ng_dps > threshold))
+        fp = int(np.sum(ok_dps <= threshold))
+        tn = int(np.sum(ok_dps > threshold))
 
     return {"TP": tp, "TN": tn, "FP": fp, "FN": fn}
 
@@ -56,6 +62,8 @@ def render_threshold_determination() -> None:
     result_df = st.session_state["result_df"]
     ok_ids = st.session_state["ok_ids"]
     ng_ids = st.session_state["ng_ids"]
+    ng_direction = st.session_state.get("ng_direction", "higher")
+    reject_rule = "dP ≥ t → NG" if ng_direction == "higher" else "dP ≤ t → NG"
 
     # 顯示最佳參數
     st.info(
@@ -106,11 +114,13 @@ def render_threshold_determination() -> None:
     with data_col1:
         ok_data = pd.DataFrame({"樣品 ID": ok_ids, "dP 值": ok_dps})
         st.markdown("**✅ OK 良品 dP**")
-        st.dataframe(ok_data, hide_index=True, use_container_width=True)
+        st.dataframe(ok_data, hide_index=True, width="stretch")
     with data_col2:
         ng_data = pd.DataFrame({"樣品 ID": ng_ids, "dP 值": ng_dps})
         st.markdown("**❌ NG 不良品 dP**")
-        st.dataframe(ng_data, hide_index=True, use_container_width=True)
+        st.dataframe(ng_data, hide_index=True, width="stretch")
+
+    st.caption("注意：此處僅使用最佳參數行的 5 台 OK + 5 台 NG 做小樣本模擬。正式量產前，建議以更大樣本再驗證界線穩健性。")
 
     st.divider()
 
@@ -135,12 +145,12 @@ def render_threshold_determination() -> None:
         value=default_threshold,
         step=0.001,
         format="%.3f",
-        help="dP ≥ t → 系統判定 NG (Reject)；dP < t → 系統判定 OK (Pass)",
+        help=f"{reject_rule}；其餘判定為 OK (Pass)",
         key="threshold_slider",
     )
 
     # ── 計算混淆矩陣 ──
-    cm = calc_confusion_matrix(ok_valid, ng_valid, threshold)
+    cm = calc_confusion_matrix(ok_valid, ng_valid, threshold, ng_direction=ng_direction)
 
     st.divider()
 
@@ -212,7 +222,7 @@ def render_threshold_determination() -> None:
         height=350,
         yaxis=dict(autorange="reversed"),
     )
-    st.plotly_chart(fig_cm, use_container_width=True)
+    st.plotly_chart(fig_cm, width="stretch")
 
     # ── dP 分布圖 (含界線) ──
     st.subheader("📈 dP 分布與判定界線")
@@ -261,4 +271,4 @@ def render_threshold_determination() -> None:
         height=400,
         showlegend=True,
     )
-    st.plotly_chart(fig_dist, use_container_width=True)
+    st.plotly_chart(fig_dist, width="stretch")

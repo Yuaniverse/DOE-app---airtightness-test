@@ -37,36 +37,62 @@ def _style_pvalue(val: float) -> str:
     return f"color: {color}; font-weight: {font_weight}"
 
 
+def _build_first_order_formula() -> str:
+    """建立一階線性模型公式。"""
+    return "Target ~ " + " + ".join(FACTOR_COLUMNS)
+
+
 def _run_curvature_test(df: pd.DataFrame, target_col: str) -> dict[str, float | int | bool] | None:
-    """以 Corner vs Center 比較執行彎曲檢定。"""
+    """以標準 DOE curvature F-test 執行彎曲檢定。"""
     if "Point_Type" not in df.columns or target_col not in df.columns:
         return None
 
-    corner = pd.to_numeric(
-        df.loc[df["Point_Type"] == "Corner", target_col],
-        errors="coerce",
-    ).dropna()
-    center = pd.to_numeric(
-        df.loc[df["Point_Type"] == "Center", target_col],
-        errors="coerce",
-    ).dropna()
+    test_df = df[df["Point_Type"].isin(["Corner", "Center"])].copy()
+    if test_df.empty:
+        return None
+
+    required_cols = FACTOR_COLUMNS + [target_col]
+    for col in required_cols:
+        test_df[col] = pd.to_numeric(test_df[col], errors="coerce")
+    test_df = test_df.dropna(subset=required_cols)
+
+    corner = test_df.loc[test_df["Point_Type"] == "Corner", target_col]
+    center = test_df.loc[test_df["Point_Type"] == "Center", target_col]
 
     if len(corner) < 2 or len(center) < 2:
         return None
 
-    t_stat, p_value = stats.ttest_ind(corner, center, equal_var=False, nan_policy="omit")
+    model_data = test_df[FACTOR_COLUMNS + [target_col]].copy()
+    model_data.columns = FACTOR_COLUMNS + ["Target"]
+
+    first_order_model = smf.ols(formula=_build_first_order_formula(), data=model_data).fit()
+    mse = float(first_order_model.mse_resid)
+    df_den = float(first_order_model.df_resid)
+
+    if not pd.notna(mse) or mse <= 0 or df_den <= 0:
+        return None
+
     mean_corner = float(corner.mean())
     mean_center = float(center.mean())
     diff = mean_center - mean_corner
+    n_corner = int(len(corner))
+    n_center = int(len(center))
+    curvature_ss = (n_corner * n_center * (mean_corner - mean_center) ** 2) / (n_corner + n_center)
+    f_stat = curvature_ss / mse
+    p_value = float(stats.f.sf(f_stat, 1, df_den))
 
     return {
-        "n_corner": int(len(corner)),
-        "n_center": int(len(center)),
+        "n_corner": n_corner,
+        "n_center": n_center,
         "mean_corner": mean_corner,
         "mean_center": mean_center,
         "diff": diff,
-        "t_stat": float(t_stat),
-        "p_value": float(p_value),
+        "curvature_ss": float(curvature_ss),
+        "mse": mse,
+        "f_stat": float(f_stat),
+        "df_num": 1,
+        "df_den": float(df_den),
+        "p_value": p_value,
         "significant": bool(pd.notna(p_value) and p_value < 0.05),
     }
 
@@ -97,7 +123,7 @@ def _detect_quadratic_factors(df: pd.DataFrame) -> list[str]:
 
 def _build_formula(quadratic_factors: list[str]) -> str:
     """建立回歸公式。"""
-    base_formula = "Target ~ (Pvac + Tvac + Tstab + Ttest)**2"
+    base_formula = "Target ~ (" + " + ".join(FACTOR_COLUMNS) + ")**2"
     if not quadratic_factors:
         return base_formula
 
@@ -244,7 +270,7 @@ def render_stats_analysis() -> None:
                     help="考慮模型項數後的調整後解釋力。",
                 )
 
-            anova_table = sm.stats.anova_lm(model, typ=2)
+            anova_table = sm.stats.anova_lm(model, typ=3)
             anova_table = anova_table.rename(
                 columns={"PR(>F)": "p-value", "sum_sq": "Sum Sq", "df": "DF", "F": "F-Value"}
             )
@@ -252,9 +278,9 @@ def render_stats_analysis() -> None:
             st.subheader("📋 變異數分析 (ANOVA)")
             formatted_anova = anova_table.style.format(
                 {"Sum Sq": "{:.4f}", "F-Value": "{:.2f}", "p-value": "{:.4f}", "DF": "{:.0f}"}
-            ).applymap(_style_pvalue, subset=["p-value"])
-            st.dataframe(formatted_anova, use_container_width=True)
-            st.caption("🔴 p-value < 0.05 代表該因子/交互作用具備統計顯著性。")
+            ).map(_style_pvalue, subset=["p-value"])
+            st.dataframe(formatted_anova, width="stretch")
+            st.caption("🔴 p-value < 0.05 代表該因子/交互作用具備統計顯著性。此處採 Type III SS，較接近 DOE / Minitab 慣用做法。")
 
             st.divider()
             st.subheader("📉 標準化效應柏拉圖 (Pareto Chart)")
@@ -288,7 +314,7 @@ def render_stats_analysis() -> None:
                 plot_bgcolor="rgba(0,0,0,0)",
                 xaxis=dict(showgrid=True, gridcolor="#e0e0e0"),
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
         except Exception as e:
             st.error(f"❌ 模型計算發生錯誤：{e}")
@@ -311,6 +337,11 @@ def render_stats_analysis() -> None:
         st.metric("平均差 (Center-Corner)", f"{curvature_result['diff']:.4f}")
     with cv4:
         st.metric("p-value", f"{curvature_result['p_value']:.4f}")
+    st.caption(
+        f"Curvature F-test：F = {curvature_result['f_stat']:.4f} "
+        f"(df = {int(curvature_result['df_num'])}, {int(curvature_result['df_den'])})，"
+        f"MSE = {curvature_result['mse']:.4f}。"
+    )
 
     curvature_plot_df = result_df[result_df["Point_Type"].isin(["Corner", "Center"])].copy()
     curvature_plot_df[target_col] = pd.to_numeric(curvature_plot_df[target_col], errors="coerce")
@@ -325,7 +356,7 @@ def render_stats_analysis() -> None:
         labels={"Point_Type": "點型態", target_col: selected_label},
         title="Corner vs Center 響應分佈比較",
     )
-    st.plotly_chart(fig_curvature, use_container_width=True)
+    st.plotly_chart(fig_curvature, width="stretch")
 
     if curvature_result["significant"]:
         st.warning(
@@ -354,8 +385,8 @@ def render_stats_analysis() -> None:
         )
     suggestion_df = pd.DataFrame(suggestion_rows)
     st.dataframe(
-        suggestion_df.style.format({"主效應 p-value": "{:.4f}"}).applymap(_style_pvalue, subset=["主效應 p-value"]),
-        use_container_width=True,
+        suggestion_df.style.format({"主效應 p-value": "{:.4f}"}).map(_style_pvalue, subset=["主效應 p-value"]),
+        width="stretch",
     )
 
     if curvature_result["significant"] and not significant_factors:
@@ -418,7 +449,7 @@ def render_stats_analysis() -> None:
             st.warning("CCC 軸點可能超出原始因子上下限，請先確認設備與製程允許此範圍。")
 
         preview_cols = ["Std_Order", "Point_Type", "Axial_Factor", "Axial_Sign", "CCD_Type", "Alpha"] + FACTOR_COLUMNS
-        st.dataframe(axial_preview_df[preview_cols], use_container_width=True)
+        st.dataframe(axial_preview_df[preview_cols], width="stretch")
 
         if st.button("🚀 產生並合併 CCD 軸點表格", type="primary", key="generate_ccd_table"):
             golden_sample, other_sample_ids = _infer_measurement_setup(base_experiment_df)
@@ -454,7 +485,7 @@ def render_stats_analysis() -> None:
     if st.session_state.get("merged_doe_df") is not None:
         merged_doe_df = st.session_state["merged_doe_df"]
         st.subheader("📄 合併後 DOE 表格預覽")
-        st.dataframe(merged_doe_df.head(10), use_container_width=True)
+        st.dataframe(merged_doe_df.head(10), width="stretch")
         st.metric("合併後總實驗組數", f"{len(merged_doe_df)} 組")
 
         highlight_cols = [f"Step{i}_dP" for i in range(1, 13)]

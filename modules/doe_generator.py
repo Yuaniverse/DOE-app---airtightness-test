@@ -96,6 +96,12 @@ def build_measurement_sequence(
     anchor_positions = [0, 5, 11]
     random_positions = [i for i in range(12) if i not in anchor_positions]
 
+    if len(other_sample_ids) < len(random_positions):
+        raise ValueError(
+            f"other_sample_ids 至少需要 {len(random_positions)} 台樣品，"
+            f"目前只有 {len(other_sample_ids)} 台。"
+        )
+
     step_id_cols = [f"Step{i+1}_ID" for i in range(12)]
     step_dp_cols = [f"Step{i+1}_dP" for i in range(12)]
 
@@ -150,8 +156,8 @@ def generate_axial_points(
     if design_type not in {"CCC", "CCF"}:
         raise ValueError("design_type 必須為 'CCC' 或 'CCF'")
 
-    k = len(valid_factors)
-    alpha = float(2 ** (k / 4)) if design_type == "CCC" else 1.0
+    original_design_k = len([factor for factor in FACTOR_COLUMNS if factor in factors]) or len(factors)
+    alpha = float(2 ** (original_design_k / 4)) if design_type == "CCC" else 1.0
 
     centers = {
         name: (float(bounds[0]) + float(bounds[1])) / 2
@@ -342,7 +348,7 @@ def render_doe_generator() -> None:
         doe_df = st.session_state["doe_df"]
 
         st.subheader("📊 實驗表格預覽（前 5 筆）")
-        st.dataframe(doe_df.head(5), use_container_width=True)
+        st.dataframe(doe_df.head(5), width="stretch")
 
         st.metric("總實驗組數", f"{len(doe_df)} 組")
 

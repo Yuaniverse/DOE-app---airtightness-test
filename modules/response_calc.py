@@ -4,8 +4,6 @@
 供工程師決策最佳氣密測試參數。
 """
 
-from typing import Optional
-
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -14,6 +12,24 @@ from utils.excel_export import export_formatted_xlsx
 
 
 # ─────────────────────────── 核心計算函式 ───────────────────────────
+
+
+def _build_row_id_dp_map(
+    row: pd.Series,
+    step_id_cols: list[str],
+    step_dp_cols: list[str],
+) -> dict[str, float]:
+    """建立單列資料的樣品 ID → dP 映射。"""
+    id_dp_map: dict[str, float] = {}
+    for id_col, dp_col in zip(step_id_cols, step_dp_cols):
+        sample_id = str(row[id_col]).strip()
+        dp_val = row[dp_col]
+        if sample_id and pd.notna(dp_val):
+            try:
+                id_dp_map[sample_id] = float(dp_val)
+            except (ValueError, TypeError):
+                continue
+    return id_dp_map
 
 
 def calc_y1(df: pd.DataFrame) -> pd.Series:
@@ -48,16 +64,20 @@ def calc_auc_score(
     df: pd.DataFrame,
     ok_ids: list[str],
     ng_ids: list[str],
+    ng_direction: str = "higher",
 ) -> pd.Series:
     """計算 AUC (鑑別正確率/Y2)：向量化的 25 次配對比較。
 
     使用 NumPy broadcasting 避免雙重迴圈。
-    記分規則：NG_dP > OK_dP → 1, NG_dP == OK_dP → 0.5, NG_dP < OK_dP → 0。
+    記分規則：
+    - ng_direction = "higher"：NG_dP > OK_dP → 1
+    - ng_direction = "lower"：NG_dP < OK_dP → 1
 
     Args:
         df: 含量測數據（Step*_ID, Step*_dP）的 DataFrame。
         ok_ids: 5 台 OK 良品的 ID 清單。
         ng_ids: 5 台 NG 不良品的 ID 清單。
+        ng_direction: NG 樣品的 dP 預期方向（"higher" 或 "lower"）。
 
     Returns:
         AUC 的 Series（每組實驗一個值）。
@@ -69,17 +89,11 @@ def calc_auc_score(
     step_id_cols = [f"Step{i}_ID" for i in range(1, 13)]
     step_dp_cols = [f"Step{i}_dP" for i in range(1, 13)]
 
+    if ng_direction not in {"higher", "lower"}:
+        raise ValueError("ng_direction 必須為 'higher' 或 'lower'")
+
     for row_idx in range(n_rows):
-        # 取出該列所有 (ID, dP) 配對
-        id_dp_map: dict[str, float] = {}
-        for id_col, dp_col in zip(step_id_cols, step_dp_cols):
-            sample_id = str(df.iloc[row_idx][id_col]).strip()
-            dp_val = df.iloc[row_idx][dp_col]
-            if sample_id and pd.notna(dp_val):
-                try:
-                    id_dp_map[sample_id] = float(dp_val)
-                except (ValueError, TypeError):
-                    continue
+        id_dp_map = _build_row_id_dp_map(df.iloc[row_idx], step_id_cols, step_dp_cols)
 
         # 提取 OK 與 NG 的 dP 陣列
         ok_dps = np.array([id_dp_map.get(sid, np.nan) for sid in ok_ids])
@@ -95,7 +109,10 @@ def calc_auc_score(
 
         # 向量化配對比較 (broadcasting)
         # ng_valid[:, None] → (ng_count, 1), ok_valid[None, :] → (1, ok_count)
-        diff = ng_valid[:, None] - ok_valid[None, :]
+        if ng_direction == "higher":
+            diff = ng_valid[:, None] - ok_valid[None, :]
+        else:
+            diff = ok_valid[None, :] - ng_valid[:, None]
         score_matrix = np.where(diff > 0, 1.0, np.where(diff == 0, 0.5, 0.0))
         total_pairs = len(ng_valid) * len(ok_valid)
         auc_scores[row_idx] = score_matrix.sum() / total_pairs
@@ -107,6 +124,7 @@ def calc_gap_q(
     df: pd.DataFrame,
     ok_ids: list[str],
     ng_ids: list[str],
+    ng_direction: str = "higher",
 ) -> pd.Series:
     """計算 GapQ (邊界安全裕度/Y3)：min(NG_dP) - max(OK_dP)。
 
@@ -116,6 +134,7 @@ def calc_gap_q(
         df: 含量測數據的 DataFrame。
         ok_ids: 5 台 OK 良品的 ID 清單。
         ng_ids: 5 台 NG 不良品的 ID 清單。
+        ng_direction: NG 樣品的 dP 預期方向（"higher" 或 "lower"）。
 
     Returns:
         GapQ 的 Series。
@@ -126,16 +145,11 @@ def calc_gap_q(
     step_id_cols = [f"Step{i}_ID" for i in range(1, 13)]
     step_dp_cols = [f"Step{i}_dP" for i in range(1, 13)]
 
+    if ng_direction not in {"higher", "lower"}:
+        raise ValueError("ng_direction 必須為 'higher' 或 'lower'")
+
     for row_idx in range(n_rows):
-        id_dp_map: dict[str, float] = {}
-        for id_col, dp_col in zip(step_id_cols, step_dp_cols):
-            sample_id = str(df.iloc[row_idx][id_col]).strip()
-            dp_val = df.iloc[row_idx][dp_col]
-            if sample_id and pd.notna(dp_val):
-                try:
-                    id_dp_map[sample_id] = float(dp_val)
-                except (ValueError, TypeError):
-                    continue
+        id_dp_map = _build_row_id_dp_map(df.iloc[row_idx], step_id_cols, step_dp_cols)
 
         ok_dps = np.array([id_dp_map.get(sid, np.nan) for sid in ok_ids])
         ng_dps = np.array([id_dp_map.get(sid, np.nan) for sid in ng_ids])
@@ -146,7 +160,10 @@ def calc_gap_q(
         if len(ok_valid) == 0 or len(ng_valid) == 0:
             gap_q_values[row_idx] = np.nan
         else:
-            gap_q_values[row_idx] = float(np.min(ng_valid) - np.max(ok_valid))
+            if ng_direction == "higher":
+                gap_q_values[row_idx] = float(np.min(ng_valid) - np.max(ok_valid))
+            else:
+                gap_q_values[row_idx] = float(np.min(ok_valid) - np.max(ng_valid))
 
     return pd.Series(gap_q_values, index=df.index, name="GapQ")
 
@@ -255,6 +272,15 @@ def render_response_calc() -> None:
         st.error(f"❌ 以下樣品同時被標記為 OK 與 NG，請修正：{', '.join(overlap)}")
         return
 
+    ng_direction_label = st.radio(
+        "📈 NG 樣品的 dP 預期方向",
+        options=["NG dP 較高（NG > OK）", "NG dP 較低（NG < OK）"],
+        horizontal=True,
+        help="這會影響 AUC、GapQ 與後續界線判定的方向解讀。",
+        key="ng_direction_label",
+    )
+    ng_direction = "higher" if "較高" in ng_direction_label else "lower"
+
     st.success("✅ OK/NG 標籤設定正確！")
 
     st.divider()
@@ -271,14 +297,15 @@ def render_response_calc() -> None:
             result_df["Y4_Stability"] = calc_y4(result_df)
 
             # AUC (Y2): 鑑別正確率
-            result_df["Y2_AUC"] = calc_auc_score(result_df, ok_ids, ng_ids)
+            result_df["Y2_AUC"] = calc_auc_score(result_df, ok_ids, ng_ids, ng_direction=ng_direction)
 
             # GapQ (Y3): 邊界安全裕度
-            result_df["Y3_GapQ"] = calc_gap_q(result_df, ok_ids, ng_ids)
+            result_df["Y3_GapQ"] = calc_gap_q(result_df, ok_ids, ng_ids, ng_direction=ng_direction)
 
             st.session_state["result_df"] = result_df
             st.session_state["ok_ids"] = ok_ids
             st.session_state["ng_ids"] = ng_ids
+            st.session_state["ng_direction"] = ng_direction
 
         st.success("✅ 計算完成！")
 
@@ -336,7 +363,7 @@ def render_response_calc() -> None:
             )
             return styler
 
-        st.dataframe(style_results(display_df), use_container_width=True)
+        st.dataframe(style_results(display_df), width="stretch")
 
         # 關鍵指標摘要
         st.subheader("📈 關鍵指標摘要")

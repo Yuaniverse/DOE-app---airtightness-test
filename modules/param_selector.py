@@ -45,7 +45,8 @@ def render_param_selector() -> None:
         line_color="red",
         annotation_text=f"Q3 = {q3_y4:.4f}",
     )
-    st.plotly_chart(fig_y4, use_container_width=True)
+    st.plotly_chart(fig_y4, width="stretch")
+    st.caption("Y4 上限預設採 Q3 作為經驗門檻，屬啟發式設定，建議仍依工程風險自行調整。")
 
     st.divider()
 
@@ -175,7 +176,7 @@ def render_param_selector() -> None:
                 "Ttest": "{:.1f}",
             }
         ),
-        use_container_width=True,
+        width="stretch",
     )
 
     # ── 最佳參數推薦 ──
