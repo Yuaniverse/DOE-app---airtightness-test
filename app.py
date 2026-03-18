@@ -82,10 +82,20 @@ st.markdown(
 # ── 初始化 session_state ──
 if "doe_df" not in st.session_state:
     st.session_state["doe_df"] = None
+if "raw_df" not in st.session_state:
+    st.session_state["raw_df"] = None
 if "result_df" not in st.session_state:
     st.session_state["result_df"] = None
 if "best_param_row" not in st.session_state:
     st.session_state["best_param_row"] = None
+if "axial_df" not in st.session_state:
+    st.session_state["axial_df"] = None
+if "merged_doe_df" not in st.session_state:
+    st.session_state["merged_doe_df"] = None
+if "ccd_selected_factors" not in st.session_state:
+    st.session_state["ccd_selected_factors"] = []
+if "ccd_design_type" not in st.session_state:
+    st.session_state["ccd_design_type"] = "CCC"
 
 # ── 模組分頁 ──
 tab1, tab2, tab3, tab4, tab5 = st.tabs(

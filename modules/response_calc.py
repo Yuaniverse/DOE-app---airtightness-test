@@ -297,7 +297,7 @@ def render_response_calc() -> None:
         display_df = result_df[display_cols].copy()
 
         # 條件格式化
-        def style_results(df: pd.DataFrame) -> pd.io.formats.style.Styler:
+        def style_results(df: pd.DataFrame):
             """套用條件格式化至結果 DataFrame。"""
             styler = df.style
 

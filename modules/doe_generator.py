@@ -1,6 +1,7 @@
 """模組一：DOE 實驗表格產生器 (Excel Generator)。
 
 負責接收使用者的實驗條件，產生完全隨機化且含三點定錨法的空白實驗紀錄表。
+亦提供 CCD 軸點（Axial Points）產生與合併功能，供模組五延伸使用。
 """
 
 import itertools
@@ -11,6 +12,9 @@ import pandas as pd
 import streamlit as st
 
 from utils.excel_export import export_formatted_xlsx
+
+
+FACTOR_COLUMNS = ["Pvac", "Tvac", "Tstab", "Ttest"]
 
 
 # ─────────────────────────── 核心演算法 ───────────────────────────
@@ -117,6 +121,119 @@ def build_measurement_sequence(
             df.at[row_idx, step_dp_cols[step_idx]] = ""  # 空白待填
 
     return df
+
+
+def generate_axial_points(
+    factors: dict[str, tuple[float, float]],
+    selected_factors: list[str],
+    design_type: str = "CCC",
+    start_std_order: int = 1,
+) -> pd.DataFrame:
+    """產生 CCD 軸點（Axial / Star Points）。
+
+    Args:
+        factors: 因子名稱 → (實際最小值, 實際最大值) 的字典。
+        selected_factors: 要納入 CCD 的因子名稱。
+        design_type: CCD 類型，支援 CCC / CCF。
+        start_std_order: 軸點起始標準順序。
+
+    Returns:
+        軸點 DataFrame，含 Axial_Factor / Axial_Sign / CCD_Type / Alpha。
+    """
+    valid_factors = [factor for factor in selected_factors if factor in factors]
+    if not valid_factors:
+        return pd.DataFrame(columns=FACTOR_COLUMNS + [
+            "Point_Type", "Std_Order", "Axial_Factor", "Axial_Sign", "CCD_Type", "Alpha"
+        ])
+
+    design_type = design_type.upper()
+    if design_type not in {"CCC", "CCF"}:
+        raise ValueError("design_type 必須為 'CCC' 或 'CCF'")
+
+    k = len(valid_factors)
+    alpha = float(2 ** (k / 4)) if design_type == "CCC" else 1.0
+
+    centers = {
+        name: (float(bounds[0]) + float(bounds[1])) / 2
+        for name, bounds in factors.items()
+    }
+
+    rows: list[dict[str, float | int | str]] = []
+    std_order = start_std_order
+
+    for factor in valid_factors:
+        min_val, max_val = factors[factor]
+        center = centers[factor]
+        half_range = (float(max_val) - float(min_val)) / 2
+
+        for sign in (-1, 1):
+            row: dict[str, float | int | str] = {name: centers[name] for name in factors}
+            row[factor] = center + sign * alpha * abs(half_range)
+            row["Point_Type"] = "Axial"
+            row["Std_Order"] = std_order
+            row["Axial_Factor"] = factor
+            row["Axial_Sign"] = "-" if sign < 0 else "+"
+            row["CCD_Type"] = design_type
+            row["Alpha"] = alpha
+            rows.append(row)
+            std_order += 1
+
+    return pd.DataFrame(rows)
+
+
+def merge_doe_with_axial(
+    base_df: pd.DataFrame,
+    axial_df: pd.DataFrame,
+    seed: Optional[int] = None,
+    randomize_new_runs: bool = True,
+) -> pd.DataFrame:
+    """將軸點表格合併回原始 DOE 表格。
+
+    設計原則：
+    - 保留原始已完成實驗的 Run_Order 不變
+    - 只對新增軸點分配新的 Run_Order
+    - 新增欄位（如 Axial_Factor / CCD_Type）會自動補齊到原始表格
+
+    Args:
+        base_df: 原始 DOE 表格。
+        axial_df: 已建立量測序列的軸點表格。
+        seed: 新增軸點 Run_Order 的隨機種子。
+        randomize_new_runs: 是否只對新增軸點順序做隨機化。
+
+    Returns:
+        合併後的完整 DOE DataFrame。
+    """
+    if axial_df.empty:
+        return base_df.copy()
+
+    merged_base = base_df.copy()
+    merged_axial = axial_df.copy()
+
+    max_run_order = int(pd.to_numeric(merged_base["Run_Order"], errors="coerce").max())
+    new_run_orders = np.arange(max_run_order + 1, max_run_order + 1 + len(merged_axial))
+
+    if randomize_new_runs and len(new_run_orders) > 1:
+        rng = np.random.default_rng(seed)
+        new_run_orders = rng.permutation(new_run_orders)
+
+    merged_axial["Run_Order"] = new_run_orders
+
+    base_cols = list(merged_base.columns)
+    extra_cols = [col for col in merged_axial.columns if col not in base_cols]
+    all_cols = base_cols + extra_cols
+
+    for col in all_cols:
+        if col not in merged_base.columns:
+            merged_base[col] = ""
+        if col not in merged_axial.columns:
+            merged_axial[col] = ""
+
+    merged_df = pd.concat(
+        [merged_base[all_cols], merged_axial[all_cols]],
+        ignore_index=True,
+    )
+    merged_df = merged_df.sort_values("Run_Order").reset_index(drop=True)
+    return merged_df
 
 
 # ─────────────────────────── UI 渲染 ───────────────────────────
